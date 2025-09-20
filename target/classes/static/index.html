@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpringBoot Netty MQTT 测试页面</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .title {
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        .info { color: #17a2b8; }
+        .status-card {
+            display: inline-block;
+            padding: 10px;
+            margin: 5px;
+            border-radius: 4px;
+            background-color: #e9ecef;
+        }
+        .log-area {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            height: 200px;
+            overflow-y: scroll;
+            font-family: monospace;
+        }
+        .device-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+        }
+        .device-card {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            background-color: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <h1>SpringBoot Netty MQTT 测试页面</h1>
+
+    <!-- 状态监控 -->
+    <div class="container">
+        <h2 class="title">系统状态</h2>
+        <div id="status-display">
+            <button onclick="loadStatus()">刷新状态</button>
+        </div>
+    </div>
+
+    <!-- MQTT消息发布 -->
+    <div class="container">
+        <h2 class="title">发布MQTT消息</h2>
+        <div class="form-group">
+            <label for="pub-topic">主题:</label>
+            <input type="text" id="pub-topic" value="test/topic" placeholder="输入MQTT主题">
+        </div>
+        <div class="form-group">
+            <label for="pub-payload">消息内容:</label>
+            <textarea id="pub-payload" rows="3" placeholder="输入消息内容">{"message": "Hello MQTT!", "timestamp": "2024-01-01 12:00:00"}</textarea>
+        </div>
+        <div class="form-group">
+            <label for="pub-qos">QoS等级:</label>
+            <select id="pub-qos">
+                <option value="0">0 - 最多一次</option>
+                <option value="1" selected>1 - 至少一次</option>
+                <option value="2">2 - 恰好一次</option>
+            </select>
+        </div>
+        <button onclick="publishMessage()">发布消息</button>
+        <button onclick="sendSystemStatus()">发送系统状态</button>
+        <button onclick="triggerSimulation()">触发模拟数据</button>
+    </div>
+
+    <!-- MQTT主题订阅 -->
+    <div class="container">
+        <h2 class="title">订阅/取消订阅</h2>
+        <div class="form-group">
+            <label for="sub-topic">主题:</label>
+            <input type="text" id="sub-topic" value="device/+/data" placeholder="输入要订阅的主题">
+        </div>
+        <div class="form-group">
+            <label for="sub-qos">QoS等级:</label>
+            <select id="sub-qos">
+                <option value="0">0 - 最多一次</option>
+                <option value="1" selected>1 - 至少一次</option>
+                <option value="2">2 - 恰好一次</option>
+            </select>
+        </div>
+        <button onclick="subscribe()">订阅主题</button>
+        <button onclick="unsubscribe()">取消订阅</button>
+    </div>
+
+    <!-- 接收到的消息 -->
+    <div class="container">
+        <h2 class="title">接收到的消息</h2>
+        <button onclick="loadMessages()">刷新消息</button>
+        <button onclick="clearMessages()">清空消息</button>
+        <div id="messages-display" class="log-area"></div>
+    </div>
+
+    <!-- 设备数据 -->
+    <div class="container">
+        <h2 class="title">设备数据</h2>
+        <button onclick="loadDevices()">刷新设备数据</button>
+        <div id="devices-display" class="device-list"></div>
+    </div>
+
+    <!-- 操作日志 -->
+    <div class="container">
+        <h2 class="title">操作日志</h2>
+        <button onclick="clearLog()">清空日志</button>
+        <div id="log-display" class="log-area"></div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/mqtt';
+        
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log-display');
+            const timestamp = new Date().toLocaleString();
+            const className = type === 'error' ? 'error' : (type === 'success' ? 'success' : 'info');
+            logDiv.innerHTML += `<div class="${className}">[${timestamp}] ${message}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('log-display').innerHTML = '';
+        }
+
+        async function loadStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/status`);
+                const data = await response.json();
+                
+                const statusDiv = document.getElementById('status-display');
+                statusDiv.innerHTML = `
+                    <button onclick="loadStatus()">刷新状态</button><br><br>
+                    <div class="status-card">
+                        <strong>服务器状态:</strong><br>
+                        ${data.server_info}<br>
+                        运行状态: ${data.server_running ? '正常' : '停止'}
+                    </div>
+                    <div class="status-card">
+                        <strong>客户端状态:</strong><br>
+                        连接状态: ${data.client_connected ? '已连接' : '未连接'}<br>
+                        连接的客户端: ${data.connected_clients}
+                    </div>
+                    <div class="status-card">
+                        <strong>设备状态:</strong><br>
+                        设备数量: ${data.device_count}
+                    </div>
+                `;
+                
+                log('状态刷新成功', 'success');
+            } catch (error) {
+                log(`刷新状态失败: ${error.message}`, 'error');
+            }
+        }
+
+        async function publishMessage() {
+            const topic = document.getElementById('pub-topic').value;
+            const payload = document.getElementById('pub-payload').value;
+            const qos = document.getElementById('pub-qos').value;
+            
+            if (!topic || !payload) {
+                log('请填写主题和消息内容', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/publish`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: `topic=${encodeURIComponent(topic)}&payload=${encodeURIComponent(payload)}&qos=${qos}`
+                });
+                
+                const data = await response.json();
+                log(`发布消息: ${data.message} (主题: ${topic})`, data.success ? 'success' : 'error');
+            } catch (error) {
+                log(`发布消息失败: ${error.message}`, 'error');
+            }
+        }
+
+        async function subscribe() {
+            const topic = document.getElementById('sub-topic').value;
+            const qos = document.getElementById('sub-qos').value;
+            
+            if (!topic) {
+                log('请填写要订阅的主题', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/subscribe`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: `topic=${encodeURIComponent(topic)}&qos=${qos}`
+                });
+                
+                const data = await response.json();
+                log(`订阅主题: ${data.message} (主题: ${topic})`, data.success ? 'success' : 'error');
+            } catch (error) {
+                log(`订阅失败: ${error.message}`, 'error');
+            }
+        }
+
+        async function unsubscribe() {
+            const topic = document.getElementById('sub-topic').value;
+            
+            if (!topic) {
+                log('请填写要取消订阅的主题', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/unsubscribe`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: `topic=${encodeURIComponent(topic)}`
+                });
+                
+                const data = await response.json();
+                log(`取消订阅: ${data.message} (主题: ${topic})`, data.success ? 'success' : 'error');
+            } catch (error) {
+                log(`取消订阅失败: ${error.message}`, 'error');
+            }
+        }
+
+        async function loadMessages() {
+            try {
+                const response = await fetch(`${API_BASE}/messages`);
+                const messages = await response.json();
+                
+                const messagesDiv = document.getElementById('messages-display');
+                if (Object.keys(messages).length === 0) {
+                    messagesDiv.innerHTML = '<div class="info">暂无接收到的消息</div>';
+                } else {
+                    let html = '';
+                    for (const [id, message] of Object.entries(messages)) {
+                        html += `<div><strong>主题:</strong> ${message.topic} | <strong>内容:</strong> ${message.payload} | <strong>时间:</strong> ${message.timestamp}</div>`;
+                    }
+                    messagesDiv.innerHTML = html;
+                }
+                
+                log('消息列表刷新成功', 'success');
+            } catch (error) {
+                log(`加载消息失败: ${error.message}`, 'error');
+            }
+        }
+
+        function clearMessages() {
+            document.getElementById('messages-display').innerHTML = '';
+            log('消息列表已清空');
+        }
+
+        async function loadDevices() {
+            try {
+                const response = await fetch(`${API_BASE}/devices`);
+                const devices = await response.json();
+                
+                const devicesDiv = document.getElementById('devices-display');
+                if (devices.length === 0) {
+                    devicesDiv.innerHTML = '<div class="info">暂无设备数据</div>';
+                } else {
+                    let html = '';
+                    devices.forEach(device => {
+                        html += `
+                            <div class="device-card">
+                                <h4>${device.deviceName} (${device.deviceId})</h4>
+                                <p><strong>类型:</strong> ${device.deviceType}</p>
+                                <p><strong>温度:</strong> ${device.temperature}°C</p>
+                                <p><strong>湿度:</strong> ${device.humidity}%</p>
+                                <p><strong>电量:</strong> ${device.battery}%</p>
+                                <p><strong>状态:</strong> ${device.status}</p>
+                                <p><strong>更新时间:</strong> ${device.timestamp}</p>
+                            </div>
+                        `;
+                    });
+                    devicesDiv.innerHTML = html;
+                }
+                
+                log('设备数据刷新成功', 'success');
+            } catch (error) {
+                log(`加载设备数据失败: ${error.message}`, 'error');
+            }
+        }
+
+        async function sendSystemStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/system/status`, {method: 'POST'});
+                const data = await response.json();
+                log(`发送系统状态: ${data.message}`, data.success ? 'success' : 'error');
+            } catch (error) {
+                log(`发送系统状态失败: ${error.message}`, 'error');
+            }
+        }
+
+        async function triggerSimulation() {
+            try {
+                const response = await fetch(`${API_BASE}/simulate`, {method: 'POST'});
+                const data = await response.json();
+                log(`模拟数据发送: ${data.message}`, data.success ? 'success' : 'error');
+            } catch (error) {
+                log(`触发模拟数据失败: ${error.message}`, 'error');
+            }
+        }
+
+        // 页面加载完成后自动刷新状态
+        window.onload = function() {
+            loadStatus();
+            log('页面加载完成', 'success');
+        };
+
+        // 定时刷新状态和数据
+        setInterval(() => {
+            loadStatus();
+            loadMessages();
+            loadDevices();
+        }, 10000); // 每10秒刷新一次
+    </script>
+</body>
+</html>

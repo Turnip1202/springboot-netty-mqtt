@@ -1,0 +1,54 @@
+server:
+  port: 8080
+
+# MQTT配置
+mqtt:
+  broker:
+    # Netty MQTT服务器配置
+    host: 0.0.0.0
+    port: 1883
+    boss-thread: 1
+    worker-thread: 4
+  client:
+    # MQTT客户端配置
+    server-url: tcp://localhost:1883
+    client-id: springboot-mqtt-client
+    username: admin
+    password: password
+    timeout: 30
+    keep-alive: 60
+    clean-session: true
+    # 订阅的主题 (JSON格式)
+    subscribe-topics: '[{"topic":"device/+/data","qos":1},{"topic":"system/status","qos":0}]'
+
+# 日志配置
+logging:
+  level:
+    com.example.mqtt: DEBUG
+    io.netty: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+# 应用配置
+spring:
+  application:
+    name: springboot-netty-mqtt
+  jackson:
+    default-property-inclusion: non_null
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+    # 支持Java 8时间类型
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      adjust-dates-to-context-time-zone: false
+
+# 监控端点
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized

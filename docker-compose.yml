@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  mqtt-app:
+    build: .
+    ports:
+      - "8080:8080"   # HTTP端口
+      - "1883:1883"   # MQTT端口
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - MQTT_BROKER_HOST=0.0.0.0
+      - MQTT_BROKER_PORT=1883
+      - MQTT_CLIENT_SERVER_URL=tcp://localhost:1883
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/mqtt/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  default:
+    driver: bridge
