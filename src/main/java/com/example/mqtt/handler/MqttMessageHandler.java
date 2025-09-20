@@ -9,6 +9,8 @@ import org.springframework.stereotype.Component;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Set;
+import java.util.Map;
 
 /**
  * MQTT消息处理器
@@ -19,6 +21,7 @@ public class MqttMessageHandler extends ChannelInboundHandlerAdapter {
 
     private static final AttributeKey<String> CLIENT_ID = AttributeKey.valueOf("clientId");
     private static final ConcurrentHashMap<String, ChannelHandlerContext> clients = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Set<String>> subscriptions = new ConcurrentHashMap<>(); // clientId -> topics
     private static final AtomicInteger messageIdCounter = new AtomicInteger(1);
 
     @Override
@@ -92,6 +95,9 @@ public class MqttMessageHandler extends ChannelInboundHandlerAdapter {
         log.info("收到发布消息 - 主题: {}, 内容: {}, 客户端: {}", 
             topic, content, getClientId(ctx));
         
+        // 转发消息给所有订阅了相关主题的客户端（包括发布者）
+        forwardMessageToSubscribers(topic, content);
+        
         // 这里可以添加业务逻辑处理
         // 比如转发给订阅者、保存到数据库等
         
@@ -111,9 +117,17 @@ public class MqttMessageHandler extends ChannelInboundHandlerAdapter {
      */
     private void handleSubscribe(ChannelHandlerContext ctx, MqttMessage msg) {
         MqttSubscribeMessage subscribeMessage = (MqttSubscribeMessage) msg;
+        String clientId = getClientId(ctx);
         
         log.info("客户端订阅请求: {}, 主题: {}", 
-            getClientId(ctx), subscribeMessage.payload().topicSubscriptions());
+            clientId, subscribeMessage.payload().topicSubscriptions());
+        
+        // 记录订阅关系
+        Set<String> clientSubscriptions = subscriptions.computeIfAbsent(clientId, k -> ConcurrentHashMap.newKeySet());
+        subscribeMessage.payload().topicSubscriptions().forEach(subscription -> {
+            clientSubscriptions.add(subscription.topicName());
+            log.debug("记录订阅: 客户端={}, 主题={}", clientId, subscription.topicName());
+        });
         
         // 发送订阅确认
         MqttSubAckMessage subAckMessage = new MqttSubAckMessage(
@@ -174,6 +188,7 @@ public class MqttMessageHandler extends ChannelInboundHandlerAdapter {
         String clientId = getClientId(ctx);
         if (clientId != null) {
             clients.remove(clientId);
+            subscriptions.remove(clientId); // 清理订阅关系
             log.info("客户端连接断开: {}", clientId);
         }
         super.channelInactive(ctx);
@@ -213,6 +228,52 @@ public class MqttMessageHandler extends ChannelInboundHandlerAdapter {
             ctx.writeAndFlush(publishMessage);
             return true;
         }
+        return false;
+    }
+    
+    /**
+     * 转发消息给订阅者
+     */
+    private void forwardMessageToSubscribers(String topic, String payload) {
+        log.debug("转发消息到订阅者 - 主题: {}", topic);
+        
+        int forwardCount = 0;
+        for (Map.Entry<String, Set<String>> entry : subscriptions.entrySet()) {
+            String clientId = entry.getKey();
+            Set<String> topics = entry.getValue();
+            
+            // 检查该客户端是否订阅了相关主题
+            for (String subscribedTopic : topics) {
+                if (topicMatches(subscribedTopic, topic)) {
+                    boolean sent = sendMessageToClient(clientId, topic, payload);
+                    if (sent) {
+                        forwardCount++;
+                        log.debug("消息转发成功: 客户端={}, 主题={}", clientId, topic);
+                    }
+                    break; // 每个客户端只转发一次
+                }
+            }
+        }
+        
+        log.info("消息转发完成 - 主题: {}, 转发数量: {}", topic, forwardCount);
+    }
+    
+    /**
+     * 检查主题是否匹配（支持通配符）
+     */
+    private boolean topicMatches(String subscribedTopic, String publishTopic) {
+        if (subscribedTopic.equals(publishTopic)) {
+            return true;
+        }
+        
+        // 处理通配符
+        if (subscribedTopic.contains("+") || subscribedTopic.contains("#")) {
+            String regex = subscribedTopic
+                .replace("+", "[^/]+")
+                .replace("#", ".*");
+            return publishTopic.matches(regex);
+        }
+        
         return false;
     }
 }

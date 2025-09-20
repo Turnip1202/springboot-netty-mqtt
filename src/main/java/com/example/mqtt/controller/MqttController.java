@@ -206,11 +206,27 @@ public class MqttController {
     public ResponseEntity<Map<String, Object>> triggerSimulation() {
         log.info("手动触发模拟数据发送");
         
-        deviceDataService.sendSimulatedData();
-        
         Map<String, Object> response = new HashMap<>();
-        response.put("success", true);
-        response.put("message", "模拟数据发送完成");
+        
+        // 检查MQTT客户端连接状态
+        if (!mqttClientService.isConnected()) {
+            response.put("success", false);
+            response.put("message", "模拟数据发送失败：MQTT客户端未连接");
+            response.put("client_connected", false);
+            return ResponseEntity.ok(response);
+        }
+        
+        try {
+            deviceDataService.sendSimulatedData();
+            response.put("success", true);
+            response.put("message", "模拟数据发送完成");
+            response.put("client_connected", true);
+            response.put("device_count", deviceDataService.getDeviceCount());
+        } catch (Exception e) {
+            log.error("手动触发模拟数据失败", e);
+            response.put("success", false);
+            response.put("message", "模拟数据发送失败: " + e.getMessage());
+        }
         
         return ResponseEntity.ok(response);
     }

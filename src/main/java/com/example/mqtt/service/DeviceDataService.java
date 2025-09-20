@@ -43,7 +43,8 @@ public class DeviceDataService {
      * 启动模拟数据发送任务
      */
     private void startSimulationTask() {
-        scheduler.scheduleAtFixedRate(this::sendSimulatedData, 10, 30, TimeUnit.SECONDS);
+        // 等待MQTT客户端连接后再开始发送模拟数据
+        scheduler.scheduleAtFixedRate(this::sendSimulatedData, 15, 30, TimeUnit.SECONDS);
     }
 
     /**
@@ -51,13 +52,22 @@ public class DeviceDataService {
      */
     public void sendSimulatedData() {
         try {
+            // 检查MQTT客户端连接状态
+            if (!mqttClientService.isConnected()) {
+                log.warn("模拟数据发送跳过，MQTT客户端未连接");
+                return;
+            }
+            
+            log.info("开始发送模拟设备数据...");
+            
             // 模拟设备1
             DeviceData device1 = createSimulatedDevice("DEV001", "温湿度传感器", "sensor");
             device1.setTemperature(20.0 + Math.random() * 15); // 20-35度
             device1.setHumidity(40.0 + Math.random() * 40);    // 40-80%
             device1.setBattery((int)(80 + Math.random() * 20)); // 80-100%
             
-            sendDeviceData(device1);
+            boolean success1 = sendDeviceData(device1);
+            log.info("设备1数据发送结果: {}, 设备ID: {}", success1 ? "成功" : "失败", device1.getDeviceId());
 
             // 模拟设备2
             DeviceData device2 = createSimulatedDevice("DEV002", "环境监测器", "monitor");
@@ -65,9 +75,12 @@ public class DeviceDataService {
             device2.setHumidity(30.0 + Math.random() * 50);    // 30-80%
             device2.setBattery((int)(60 + Math.random() * 40)); // 60-100%
             
-            sendDeviceData(device2);
+            boolean success2 = sendDeviceData(device2);
+            log.info("设备2数据发送结果: {}, 设备ID: {}", success2 ? "成功" : "失败", device2.getDeviceId());
 
-            log.info("发送模拟设备数据完成");
+            log.info("发送模拟设备数据完成 - 成功: {}, 失败: {}", 
+                (success1 ? 1 : 0) + (success2 ? 1 : 0), 
+                (success1 ? 0 : 1) + (success2 ? 0 : 1));
             
         } catch (Exception e) {
             log.error("发送模拟设备数据失败", e);
@@ -102,18 +115,26 @@ public class DeviceDataService {
             String topic = "device/" + deviceData.getDeviceId() + "/data";
             String payload = objectMapper.writeValueAsString(deviceData);
             
+            log.debug("准备发送设备数据 - 主题: {}, 设备: {}", topic, deviceData.getDeviceId());
+            
             boolean success = mqttClientService.publish(topic, payload, 1, false);
             
             if (success) {
                 // 保存到本地存储
                 deviceDataMap.put(deviceData.getDeviceId(), deviceData);
-                log.debug("设备数据发送成功: {}", deviceData.getDeviceId());
+                log.info("设备数据发送成功: {} - 温度: {}°C, 湿度: {}%, 电量: {}%", 
+                    deviceData.getDeviceId(), 
+                    String.format("%.1f", deviceData.getTemperature()),
+                    String.format("%.1f", deviceData.getHumidity()),
+                    deviceData.getBattery());
+            } else {
+                log.warn("设备数据发送失败: {}", deviceData.getDeviceId());
             }
             
             return success;
             
         } catch (Exception e) {
-            log.error("发送设备数据失败", e);
+            log.error("发送设备数据失败: {}", deviceData.getDeviceId(), e);
             return false;
         }
     }
